@@ -54,38 +54,116 @@ class LeadExtractionService {
 
   /**
    * Fallback search using web scraping (for when Google API is not available)
+   * Uses DuckDuckGo Lite endpoint with POST request (reliable, no API key needed)
    */
   async fallbackSearch(query, numResults = 10) {
+    let leads = await this.duckDuckGoLiteSearch(query, numResults);
+
+    // If DDG Lite returns nothing, try the HTML endpoint as secondary
+    if (leads.length === 0) {
+      leads = await this.duckDuckGoHtmlSearch(query, numResults);
+    }
+
+    return leads.slice(0, numResults);
+  }
+
+  /**
+   * DuckDuckGo Lite search (POST request)
+   */
+  async duckDuckGoLiteSearch(query, numResults = 10) {
+    const leads = [];
+    const userAgents = [
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+    ];
+
+    try {
+      const params = new URLSearchParams();
+      params.append('q', query);
+
+      const response = await axios.post('https://lite.duckduckgo.com/lite/', params.toString(), {
+        headers: {
+          'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Referer': 'https://lite.duckduckgo.com/'
+        },
+        timeout: 15000
+      });
+
+      const $ = cheerio.load(response.data);
+      const snippets = [];
+      $('.result-snippet').each((i, el) => {
+        snippets.push($(el).text().trim());
+      });
+
+      let idx = 0;
+      $('a.result-link').each((i, el) => {
+        if (leads.length >= numResults) return false;
+
+        const title = $(el).text().trim();
+        const url = $(el).attr('href');
+
+        if (title && url && url.startsWith('http')) {
+          leads.push({
+            company_name: title,
+            website: url,
+            description: snippets[idx] || '',
+            source: 'duckduckgo'
+          });
+          idx++;
+        }
+      });
+    } catch (err) {
+      logger.error('DuckDuckGo Lite search error:', err.message);
+    }
+
+    return leads;
+  }
+
+  /**
+   * DuckDuckGo HTML search (secondary fallback, POST request)
+   */
+  async duckDuckGoHtmlSearch(query, numResults = 10) {
     const leads = [];
 
     try {
-      // Search using DuckDuckGo HTML (no API key needed)
-      const response = await axios.get('https://html.duckduckgo.com/html/', {
-        params: { q: query },
+      const params = new URLSearchParams();
+      params.append('q', query);
+
+      const response = await axios.post('https://html.duckduckgo.com/html/', params.toString(), {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Referer': 'https://html.duckduckgo.com/'
+        },
+        timeout: 15000
       });
 
       const $ = cheerio.load(response.data);
       $('.result__body').each((i, el) => {
         if (leads.length >= numResults) return false;
 
-        const title = $(el).find('.result__title').text().trim();
-        const url = $(el).find('.result__url').text().trim();
+        const title = $(el).find('.result__a').text().trim();
+        let url = $(el).find('.result__a').attr('href') || '';
         const snippet = $(el).find('.result__snippet').text().trim();
 
-        if (title && url) {
+        // DDG sometimes wraps the real URL in a redirect param
+        const uddgMatch = url.match(/uddg=([^&]+)/);
+        if (uddgMatch) {
+          url = decodeURIComponent(uddgMatch[1]);
+        }
+
+        if (title && url && url.startsWith('http')) {
           leads.push({
             company_name: title,
-            website: url.startsWith('http') ? url : `https://${url}`,
+            website: url,
             description: snippet,
-            source: 'web_search'
+            source: 'duckduckgo_html'
           });
         }
       });
     } catch (err) {
-      logger.error('Fallback search error:', err.message);
+      logger.error('DuckDuckGo HTML search error:', err.message);
     }
 
     return leads;
