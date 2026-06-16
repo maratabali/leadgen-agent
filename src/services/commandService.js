@@ -71,12 +71,12 @@ Respond in JSON:
           command: confirmation_message
         });
 
-        // Auto-start the campaign
+        // Auto-start the campaign (runs in background)
         const result = await CampaignService.startCampaign(campaign.id);
 
         return {
           success: true,
-          message: `Campaign created and processing: "${campaign.name}"\n\nResults:\n- Leads found: ${result.leads_found}\n- Leads qualified: ${result.leads_qualified}\n- Emails generated: ${result.emails_generated}\n\nCampaign is ready. Use "Launch campaign #${campaign.id}" to start sending emails.`,
+          message: `Campaign created: "${campaign.name}" (#${campaign.id})\n\nLead extraction and qualification are now running in the background. This can take a few minutes depending on volume. Refresh the Campaigns or Leads page to watch progress.\n\nOnce the campaign status shows "ready", use "Launch campaign #${campaign.id}" to start sending emails.`,
           data: result
         };
       }

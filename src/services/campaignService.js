@@ -26,7 +26,7 @@ class CampaignService {
   }
 
   /**
-   * Start a campaign - runs the full pipeline
+   * Start a campaign - kicks off the pipeline in the background and returns immediately
    */
   async startCampaign(campaignId) {
     const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(campaignId);
@@ -38,6 +38,23 @@ class CampaignService {
 
     logger.info(`Starting campaign ${campaignId}: ${campaign.name}`);
 
+    // Run the heavy pipeline in the background (do NOT await)
+    this.runPipeline(campaignId, campaign).catch((err) => {
+      logger.error(`Campaign ${campaignId} pipeline error:`, err);
+    });
+
+    // Return immediately so the HTTP request does not time out
+    return {
+      campaign_id: campaignId,
+      status: 'extracting',
+      message: 'Campaign started. Lead extraction is running in the background. Refresh to see progress.'
+    };
+  }
+
+  /**
+   * The full lead generation pipeline (runs in background)
+   */
+  async runPipeline(campaignId, campaign) {
     try {
       // Step 1: Extract leads
       logger.info('Step 1: Extracting leads...');
@@ -77,19 +94,12 @@ class CampaignService {
           emails_generated: emails.length
         }));
 
-      return {
-        campaign_id: campaignId,
-        leads_found: rawLeads.length,
-        leads_qualified: savedCount,
-        emails_generated: emails.length,
-        status: 'ready'
-      };
+      logger.info(`Campaign ${campaignId} ready: ${rawLeads.length} found, ${savedCount} qualified, ${emails.length} emails`);
 
     } catch (err) {
       logger.error(`Campaign ${campaignId} error:`, err);
       db.prepare('UPDATE campaigns SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .run('error', campaignId);
-      throw err;
     }
   }
 
