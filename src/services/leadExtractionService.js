@@ -57,11 +57,14 @@ class LeadExtractionService {
    * Uses DuckDuckGo Lite endpoint with POST request (reliable, no API key needed)
    */
   async fallbackSearch(query, numResults = 10) {
+    logger.info(`[fallbackSearch] query="${query}" target=${numResults}`);
     let leads = await this.duckDuckGoLiteSearch(query, numResults);
+    logger.info(`[fallbackSearch] DDG Lite returned ${leads.length} leads`);
 
     // If DDG Lite returns nothing, try the HTML endpoint as secondary
     if (leads.length === 0) {
       leads = await this.duckDuckGoHtmlSearch(query, numResults);
+      logger.info(`[fallbackSearch] DDG HTML returned ${leads.length} leads`);
     }
 
     return leads.slice(0, numResults);
@@ -90,11 +93,13 @@ class LeadExtractionService {
         timeout: 15000
       });
 
+      logger.info(`[DDG Lite] HTTP ${response.status}, body length=${(response.data || '').length}`);
       const $ = cheerio.load(response.data);
       const snippets = [];
       $('.result-snippet').each((i, el) => {
         snippets.push($(el).text().trim());
       });
+      logger.info(`[DDG Lite] found ${$('a.result-link').length} result-link elements`);
 
       let idx = 0;
       $('a.result-link').each((i, el) => {
@@ -114,7 +119,7 @@ class LeadExtractionService {
         }
       });
     } catch (err) {
-      logger.error('DuckDuckGo Lite search error:', err.message);
+      logger.error(`DuckDuckGo Lite search error: ${err.message} | code=${err.code} | status=${err.response && err.response.status}`);
     }
 
     return leads;
